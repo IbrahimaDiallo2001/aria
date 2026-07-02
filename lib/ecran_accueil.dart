@@ -8,7 +8,8 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:url_launcher/url_launcher.dart';
+
+import 'ecran_confidentialite.dart';
 
 import 'ecran_pilier.dart';
 import 'ecran_projet.dart';
@@ -470,14 +471,13 @@ class _EcranAccueilState extends State<EcranAccueil> {
 
   // ── À propos ───────────────────────────────────────────────
   static const String _versionApp = '1.0.0';
-  static const String _urlConfidentialite =
-      'https://ibrahimadiallo2001.github.io/aria/confidentialite.html';
 
   void _ouvrirAPropos() {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        content: Column(
+        content: SingleChildScrollView(
+          child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Container(
@@ -534,17 +534,19 @@ class _EcranAccueilState extends State<EcranAccueil> {
             ),
             const SizedBox(height: 10),
             TextButton.icon(
-              onPressed: () => launchUrl(
-                Uri.parse(_urlConfidentialite),
-                mode: LaunchMode.externalApplication,
-              ),
-              icon: const Icon(Icons.open_in_new_rounded, size: 16),
+              onPressed: () {
+                Navigator.pop(ctx);
+                Navigator.push(
+                    context, slideRoute(const EcranConfidentialite()));
+              },
+              icon: const Icon(Icons.privacy_tip_outlined, size: 16),
               label: Text(tr('Politique de confidentialité'),
                   style: const TextStyle(fontSize: 13)),
             ),
             Text('© 2026 Ibrahima Diallo',
                 style: TextStyle(fontSize: 11, color: cMutedOf(ctx))),
           ],
+          ),
         ),
         actions: [
           TextButton(
