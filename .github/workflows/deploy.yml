@@ -36,7 +36,8 @@ jobs:
         run: flutter pub get
 
       - name: Compiler la version web
-        run: flutter build web --release --base-href /aria/
+        # base-href calculé depuis le nom réel du dépôt (insensible aux renommages)
+        run: flutter build web --release --base-href "/${{ github.event.repository.name }}/"
 
       - name: Préparer l'artefact Pages
         uses: actions/upload-pages-artifact@v3
