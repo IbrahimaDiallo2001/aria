@@ -165,6 +165,17 @@ const Map<String, Map<String, String>> kI18n = {
   'Modifier le projet': {'en': 'Edit project', 'es': 'Editar proyecto', 'ar': 'تعديل المشروع', 'wo': 'Soppi projet bi'},
   'Modifier': {'en': 'Edit', 'es': 'Editar', 'ar': 'تعديل', 'wo': 'Soppi'},
   'Enregistrer': {'en': 'Save', 'es': 'Guardar', 'ar': 'حفظ', 'wo': 'Denc'},
+  // À propos
+  'À propos': {'en': 'About', 'es': 'Acerca de', 'ar': 'حول التطبيق', 'wo': 'Ci mbirum app bi'},
+  'Version': {'en': 'Version', 'es': 'Versión', 'ar': 'الإصدار', 'wo': 'Sumb'},
+  'Créée par': {'en': 'Created by', 'es': 'Creada por', 'ar': 'من تطوير', 'wo': 'Ki ko defar :'},
+  'Politique de confidentialité': {'en': 'Privacy policy', 'es': 'Política de privacidad', 'ar': 'سياسة الخصوصية', 'wo': 'Politig sutura'},
+  'Tes données restent uniquement sur ton appareil.': {
+    'en': 'Your data stays on your device only.',
+    'es': 'Tus datos permanecen solo en tu dispositivo.',
+    'ar': 'بياناتك تبقى على جهازك فقط.',
+    'wo': 'Sa données yi ci sa appareil rekk lañuy des.'
+  },
   // Réglages / rappels / export
   'Réglages': {'en': 'Settings', 'es': 'Ajustes', 'ar': 'الإعدادات', 'wo': 'Coppite'},
   'Rappel quotidien': {'en': 'Daily reminder', 'es': 'Recordatorio diario', 'ar': 'تذكير يومي', 'wo': 'Fàttali bés bu nekk'},

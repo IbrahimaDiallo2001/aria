@@ -8,6 +8,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import 'ecran_pilier.dart';
 import 'ecran_projet.dart';
@@ -450,10 +451,105 @@ class _EcranAccueilState extends State<EcranAccueil> {
                   _importer();
                 },
               ),
+              const Divider(height: 8),
+              ListTile(
+                leading: const Icon(Icons.info_outline_rounded),
+                title: Text(tr('À propos')),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _ouvrirAPropos();
+                },
+              ),
               const SizedBox(height: 8),
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  // ── À propos ───────────────────────────────────────────────
+  static const String _versionApp = '1.0.0';
+  static const String _urlConfidentialite =
+      'https://ibrahimadiallo2001.github.io/aria/confidentialite.html';
+
+  void _ouvrirAPropos() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 72,
+              height: 72,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: const LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [cOrClair, cOr],
+                ),
+                boxShadow: [
+                  BoxShadow(color: cOr.withValues(alpha: 0.35), blurRadius: 24),
+                ],
+              ),
+              child: Icon(Icons.self_improvement, size: 40, color: surCouleur(cOr)),
+            ),
+            const SizedBox(height: 14),
+            Text('Aria',
+                style: TextStyle(
+                    fontSize: 24, fontWeight: FontWeight.w700, color: cInkOf(ctx))),
+            const SizedBox(height: 2),
+            Text(tr("Ton chemin vers l'équilibre"),
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 12.5, color: cMutedOf(ctx))),
+            const SizedBox(height: 14),
+            Text('${tr('Version')} $_versionApp',
+                style: TextStyle(fontSize: 12.5, color: cMutedOf(ctx))),
+            const SizedBox(height: 4),
+            Text('${tr('Créée par')} Ibrahima Diallo',
+                style: TextStyle(
+                    fontSize: 13.5, fontWeight: FontWeight.w600, color: cInkOf(ctx))),
+            const SizedBox(height: 14),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: cOr.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.lock_rounded, size: 15, color: cOr),
+                  const SizedBox(width: 6),
+                  Flexible(
+                    child: Text(
+                      tr('Tes données restent uniquement sur ton appareil.'),
+                      style: TextStyle(fontSize: 11.5, color: cInkOf(ctx)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 10),
+            TextButton.icon(
+              onPressed: () => launchUrl(
+                Uri.parse(_urlConfidentialite),
+                mode: LaunchMode.externalApplication,
+              ),
+              icon: const Icon(Icons.open_in_new_rounded, size: 16),
+              label: Text(tr('Politique de confidentialité'),
+                  style: const TextStyle(fontSize: 13)),
+            ),
+            Text('© 2026 Ibrahima Diallo',
+                style: TextStyle(fontSize: 11, color: cMutedOf(ctx))),
+          ],
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx), child: Text(tr('Fermer'))),
+        ],
       ),
     );
   }

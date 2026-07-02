@@ -45,9 +45,9 @@ L'app doit être signée avec ta propre clé (actuellement elle utilise la clé 
 
 ## Étape C — Contenu obligatoire du store
 
-- [ ] **Politique de confidentialité** : page web publique obligatoire.
-      Aria stocke tout en local → politique très simple. Je peux la rédiger
-      et on peut l'héberger gratuitement (GitHub Pages).
+- [x] **Politique de confidentialité** : publiée sur
+      https://ibrahimadiallo2001.github.io/aria/confidentialite.html
+      (fichier `web/confidentialite.html`, éditeur : Ibrahima Diallo)
 - [ ] **Icône** 512×512 px (PNG, sans transparence)
 - [ ] **Bannière** (feature graphic) 1024×500 px
 - [ ] **Captures d'écran** : minimum 2, idéalement 4-8 (téléphone)
