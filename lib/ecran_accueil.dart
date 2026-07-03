@@ -7,6 +7,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'ecran_confidentialite.dart';
@@ -39,6 +40,7 @@ class EcranAccueil extends StatefulWidget {
 
 class _EcranAccueilState extends State<EcranAccueil> {
   int _onglet = 0;
+  final List<int> _pileOnglets = []; // pour le bouton « retour »
   late List<List<Pratique>> _pratiques; // modifiables par l'utilisateur
   late List<List<bool>> _etats;
   List<Projet> _projets = [];
@@ -48,6 +50,8 @@ class _EcranAccueilState extends State<EcranAccueil> {
   int _rappelM = 0;
   List<Map<String, dynamic>> _historique = []; // {d:'YYYY-MM-DD', f:int, t:int}
   int _fenetreHisto = 7; // 7 ou 30 jours pour le graphique
+  // Journal : une entrée par jour {d:'YYYY-MM-DD', appris, g1, g2, g3}
+  List<Map<String, dynamic>> _journalEntrees = [];
 
   final _ctrlAppris = TextEditingController();
   final _ctrlGrat1 = TextEditingController();
@@ -91,10 +95,7 @@ class _EcranAccueilState extends State<EcranAccueil> {
         _etats[i] = List<bool>.filled(_pratiques[i].length, false);
       }
     }
-    _ctrlAppris.text = prefs.getString('aria_jrn_appris') ?? '';
-    _ctrlGrat1.text = prefs.getString('aria_jrn_grat1') ?? '';
-    _ctrlGrat2.text = prefs.getString('aria_jrn_grat2') ?? '';
-    _ctrlGrat3.text = prefs.getString('aria_jrn_grat3') ?? '';
+    await _chargerJournal(prefs);
     // Projets
     final bruts = prefs.getStringList('aria_projets') ?? [];
     _projets = [
@@ -305,35 +306,24 @@ class _EcranAccueilState extends State<EcranAccueil> {
     for (final k in prefs.getKeys()) {
       if (k.startsWith('aria_')) data[k] = prefs.get(k);
     }
-    final json = const JsonEncoder.withIndent('  ').convert({'app': 'aria', 'v': 1, 'data': data});
-    if (!mounted) return;
-    await showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(tr('Exporter mes données')),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: SingleChildScrollView(
-            child: SelectableText(json, style: const TextStyle(fontSize: 11, fontFamily: 'monospace')),
-          ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: Text(tr('Fermer'))),
-          FilledButton.icon(
-            onPressed: () async {
-              final nav = Navigator.of(ctx);
-              final messenger = ScaffoldMessenger.of(context);
-              await Clipboard.setData(ClipboardData(text: json));
-              nav.pop();
-              messenger.showSnackBar(
-                SnackBar(content: Text(tr('Copié !')), behavior: SnackBarBehavior.floating));
-            },
-            icon: const Icon(Icons.copy_rounded),
-            label: Text(tr('Copier')),
-          ),
-        ],
-      ),
-    );
+    final json = const JsonEncoder.withIndent('  ')
+        .convert({'app': 'aria', 'v': 1, 'data': data});
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      // Ouvre la feuille de partage du système avec un fichier .json
+      // (à enregistrer dans Fichiers, envoyer par e-mail, Drive…).
+      final nom = 'aria_sauvegarde_${_cleJour(DateTime.now())}.json';
+      await SharePlus.instance.share(ShareParams(
+        files: [XFile.fromData(utf8.encode(json), mimeType: 'application/json')],
+        fileNameOverrides: [nom],
+        subject: 'Aria — ${tr('Exporter mes données')}',
+      ));
+    } catch (_) {
+      // Repli (plateforme sans partage) : copie dans le presse-papiers.
+      await Clipboard.setData(ClipboardData(text: json));
+      messenger.showSnackBar(SnackBar(
+          content: Text(tr('Copié !')), behavior: SnackBarBehavior.floating));
+    }
   }
 
   Future<void> _importer() async {
@@ -714,12 +704,76 @@ class _EcranAccueilState extends State<EcranAccueil> {
     }
   }
 
-  Future<void> _sauvegarderJournal() async {
+  // ── Journal : chargement, migration et sauvegarde ──────────
+  Future<void> _chargerJournal(SharedPreferences prefs) async {
+    final bruts = prefs.getStringList('aria_journal') ?? [];
+    _journalEntrees = [
+      for (final s in bruts) Map<String, dynamic>.from(jsonDecode(s) as Map)
+    ];
+    // Migration depuis l'ancienne version (champs uniques, sans date).
+    if (_journalEntrees.isEmpty) {
+      final appris = prefs.getString('aria_jrn_appris') ?? '';
+      final g1 = prefs.getString('aria_jrn_grat1') ?? '';
+      final g2 = prefs.getString('aria_jrn_grat2') ?? '';
+      final g3 = prefs.getString('aria_jrn_grat3') ?? '';
+      if ('$appris$g1$g2$g3'.trim().isNotEmpty) {
+        _journalEntrees.add({
+          'd': _cleJour(DateTime.now()),
+          'appris': appris,
+          'g1': g1,
+          'g2': g2,
+          'g3': g3,
+        });
+        await _persisterJournal();
+      }
+    }
+    for (final k in ['aria_jrn_appris', 'aria_jrn_grat1', 'aria_jrn_grat2', 'aria_jrn_grat3']) {
+      await prefs.remove(k);
+    }
+    // Pré-remplit le formulaire avec l'entrée du jour, si elle existe.
+    final auj = _cleJour(DateTime.now());
+    final e = _entreeDuJour(auj);
+    _ctrlAppris.text = (e?['appris'] ?? '') as String;
+    _ctrlGrat1.text = (e?['g1'] ?? '') as String;
+    _ctrlGrat2.text = (e?['g2'] ?? '') as String;
+    _ctrlGrat3.text = (e?['g3'] ?? '') as String;
+  }
+
+  Map<String, dynamic>? _entreeDuJour(String cle) {
+    for (final e in _journalEntrees) {
+      if (e['d'] == cle) return e;
+    }
+    return null;
+  }
+
+  Future<void> _persisterJournal() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('aria_jrn_appris', _ctrlAppris.text);
-    await prefs.setString('aria_jrn_grat1', _ctrlGrat1.text);
-    await prefs.setString('aria_jrn_grat2', _ctrlGrat2.text);
-    await prefs.setString('aria_jrn_grat3', _ctrlGrat3.text);
+    _journalEntrees.sort((a, b) => (b['d'] as String).compareTo(a['d'] as String));
+    await prefs.setStringList(
+        'aria_journal', [for (final e in _journalEntrees) jsonEncode(e)]);
+  }
+
+  Future<void> _sauvegarderJournal({bool notifier = false}) async {
+    final auj = _cleJour(DateTime.now());
+    _journalEntrees.removeWhere((e) => e['d'] == auj);
+    final contenu =
+        '${_ctrlAppris.text}${_ctrlGrat1.text}${_ctrlGrat2.text}${_ctrlGrat3.text}';
+    if (contenu.trim().isNotEmpty) {
+      _journalEntrees.add({
+        'd': auj,
+        'appris': _ctrlAppris.text,
+        'g1': _ctrlGrat1.text,
+        'g2': _ctrlGrat2.text,
+        'g3': _ctrlGrat3.text,
+      });
+    }
+    await _persisterJournal();
+    if (notifier && mounted) {
+      setState(() {});
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(tr('Entrée enregistrée ✓')),
+          behavior: SnackBarBehavior.floating));
+    }
   }
 
   int get _totalPratiques => _pratiques.fold(0, (s, e) => s + e.length);
@@ -759,13 +813,26 @@ class _EcranAccueilState extends State<EcranAccueil> {
     );
   }
 
+  // Revient à l'onglet visité précédemment (ou à l'accueil).
+  void _retourOnglet() {
+    setState(() {
+      _onglet = _pileOnglets.isNotEmpty ? _pileOnglets.removeLast() : 0;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return PopScope(
+      canPop: _onglet == 0,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _retourOnglet();
+      },
+      child: Scaffold(
       body: SafeArea(child: _pageCourante()),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _onglet,
         onDestinationSelected: (i) {
+          if (i != _onglet) _pileOnglets.add(_onglet);
           // « Accueil » ramène à la page de bienvenue.
           if (i == 0 && widget.onRetourBienvenue != null) {
             setState(() => _onglet = 0);
@@ -780,6 +847,7 @@ class _EcranAccueilState extends State<EcranAccueil> {
           NavigationDestination(icon: const Icon(Icons.book_outlined), selectedIcon: const Icon(Icons.book), label: tr('Journal')),
           NavigationDestination(icon: const Icon(Icons.bar_chart_outlined), selectedIcon: const Icon(Icons.bar_chart), label: tr('Progrès')),
         ],
+      ),
       ),
     );
   }
@@ -801,6 +869,14 @@ class _EcranAccueilState extends State<EcranAccueil> {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        if (_onglet != 0) ...[
+          IconButton.filledTonal(
+            onPressed: _retourOnglet,
+            tooltip: tr('Retour'),
+            icon: const Icon(Icons.arrow_back_rounded),
+          ),
+          const SizedBox(width: 10),
+        ],
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -1483,6 +1559,11 @@ class _EcranAccueilState extends State<EcranAccueil> {
 
   // ── JOURNAL ────────────────────────────────────────────────
   Widget _pageJournal() {
+    final auj = _cleJour(DateTime.now());
+    final anciennes = [
+      for (final e in _journalEntrees)
+        if (e['d'] != auj) e
+    ];
     return ListView(
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 28),
       children: [
@@ -1501,8 +1582,194 @@ class _EcranAccueilState extends State<EcranAccueil> {
             _champ(_ctrlGrat3, '3. ', lignes: 1),
           ]),
         ),
+        FilledButton.icon(
+          onPressed: () => _sauvegarderJournal(notifier: true),
+          icon: const Icon(Icons.save_rounded),
+          label: Text(tr('Enregistrer')),
+          style: FilledButton.styleFrom(
+            backgroundColor: cOr,
+            foregroundColor: surCouleur(cOr),
+            padding: const EdgeInsets.symmetric(vertical: 14),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          ),
+        ),
+        if (anciennes.isNotEmpty) ...[
+          const SizedBox(height: 26),
+          Text(tr('ENTRÉES PRÉCÉDENTES'),
+              style: TextStyle(
+                  color: cMutedOf(context),
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.6,
+                  fontSize: 12.5)),
+          const SizedBox(height: 12),
+          for (final e in anciennes) _carteEntreeJournal(e),
+        ],
       ],
     );
+  }
+
+  String _dateEntree(String cle) {
+    final p = cle.split('-');
+    final d = DateTime(int.parse(p[0]), int.parse(p[1]), int.parse(p[2]));
+    return '${tr(kJoursFr[d.weekday - 1])} ${dateCourte(d)}';
+  }
+
+  Widget _carteEntreeJournal(Map<String, dynamic> e) {
+    final appris = (e['appris'] ?? '') as String;
+    final grats = [
+      for (final k in ['g1', 'g2', 'g3'])
+        if (((e[k] ?? '') as String).trim().isNotEmpty) (e[k] as String)
+    ];
+    final apercu = appris.trim().isNotEmpty ? appris : grats.join(' · ');
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Material(
+        color: cCard(context),
+        borderRadius: BorderRadius.circular(20),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(20),
+          onTap: () => _modifierEntree(e),
+          child: Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: cBorderOf(context)),
+              boxShadow: cardShadow(context),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 38,
+                  height: 38,
+                  decoration: BoxDecoration(
+                    color: cOr.withValues(alpha: 0.14),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(Icons.book_rounded, color: cOr, size: 20),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(_dateEntree(e['d'] as String),
+                          style: TextStyle(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 13.5,
+                              color: cInkOf(context))),
+                      if (apercu.trim().isNotEmpty) ...[
+                        const SizedBox(height: 3),
+                        Text(apercu,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(fontSize: 12, color: cMutedOf(context))),
+                      ],
+                    ],
+                  ),
+                ),
+                Icon(Icons.edit_rounded, size: 18, color: cMutedOf(context)),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _modifierEntree(Map<String, dynamic> e) async {
+    final cAppris = TextEditingController(text: (e['appris'] ?? '') as String);
+    final cG1 = TextEditingController(text: (e['g1'] ?? '') as String);
+    final cG2 = TextEditingController(text: (e['g2'] ?? '') as String);
+    final cG3 = TextEditingController(text: (e['g3'] ?? '') as String);
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (ctx) => Padding(
+        padding: EdgeInsets.only(
+          left: 20,
+          right: 20,
+          bottom: MediaQuery.of(ctx).viewInsets.bottom + 20,
+        ),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(_dateEntree(e['d'] as String),
+                  style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+              const SizedBox(height: 14),
+              Text(tr("📝 Qu'as-tu appris aujourd'hui ?"),
+                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+              const SizedBox(height: 8),
+              _champ(cAppris, tr('Écris librement…'), lignes: 3),
+              const SizedBox(height: 14),
+              Text(tr('🙏 3 gratitudes du jour'),
+                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+              const SizedBox(height: 8),
+              _champ(cG1, '1. ', lignes: 1),
+              const SizedBox(height: 8),
+              _champ(cG2, '2. ', lignes: 1),
+              const SizedBox(height: 8),
+              _champ(cG3, '3. ', lignes: 1),
+              const SizedBox(height: 18),
+              Row(
+                children: [
+                  TextButton.icon(
+                    onPressed: () async {
+                      final ok = await showDialog<bool>(
+                        context: ctx,
+                        builder: (c2) => AlertDialog(
+                          title: Text(tr('Supprimer cette entrée ?')),
+                          actions: [
+                            TextButton(
+                                onPressed: () => Navigator.pop(c2, false),
+                                child: Text(tr('Annuler'))),
+                            FilledButton(
+                              style: FilledButton.styleFrom(backgroundColor: Colors.red),
+                              onPressed: () => Navigator.pop(c2, true),
+                              child: Text(tr('Supprimer')),
+                            ),
+                          ],
+                        ),
+                      );
+                      if (ok == true && ctx.mounted) {
+                        _journalEntrees.remove(e);
+                        await _persisterJournal();
+                        if (ctx.mounted) Navigator.pop(ctx);
+                        if (mounted) setState(() {});
+                      }
+                    },
+                    icon: const Icon(Icons.delete_outline_rounded, color: Colors.red, size: 19),
+                    label: Text(tr('Supprimer'), style: const TextStyle(color: Colors.red)),
+                  ),
+                  const Spacer(),
+                  FilledButton.icon(
+                    style: FilledButton.styleFrom(
+                        backgroundColor: cOr, foregroundColor: surCouleur(cOr)),
+                    onPressed: () async {
+                      e['appris'] = cAppris.text;
+                      e['g1'] = cG1.text;
+                      e['g2'] = cG2.text;
+                      e['g3'] = cG3.text;
+                      await _persisterJournal();
+                      if (ctx.mounted) Navigator.pop(ctx);
+                      if (mounted) setState(() {});
+                    },
+                    icon: const Icon(Icons.save_rounded, size: 19),
+                    label: Text(tr('Enregistrer')),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    cAppris.dispose();
+    cG1.dispose();
+    cG2.dispose();
+    cG3.dispose();
   }
 
   Widget _carteJournal({required String titre, required Widget enfant}) {
