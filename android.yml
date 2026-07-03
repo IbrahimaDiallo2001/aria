@@ -1,0 +1,78 @@
+# ============================================================
+#  Aria — Compilation automatique de l'APK Android.
+#  À chaque push sur `main`, ce workflow compile l'APK et le
+#  publie dans la release « android » du dépôt. Lien stable :
+#  https://github.com/<pseudo>/aria/releases/download/android/app-release.apk
+#
+#  Signature : si les secrets KEYSTORE_BASE64, KEYSTORE_PASSWORD,
+#  KEY_ALIAS et KEY_PASSWORD existent, l'APK est signé avec ta
+#  vraie clé (mises à jour installables par-dessus). Sinon, il
+#  est signé avec une clé de débogage (il faudra désinstaller
+#  l'ancienne version à chaque mise à jour).
+# ============================================================
+name: Compiler l'APK Android
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: # permet aussi un lancement manuel
+
+permissions:
+  contents: write # nécessaire pour publier la release
+
+concurrency:
+  group: apk
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Récupérer le code
+        uses: actions/checkout@v4
+
+      - name: Installer Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Installer Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Restaurer la clé de signature (si configurée)
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > android/app/aria.jks
+            printf 'storeFile=aria.jks\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n' \
+              "$KEYSTORE_PASSWORD" "$KEY_ALIAS" "$KEY_PASSWORD" > android/key.properties
+            echo "Clé de signature restaurée."
+          else
+            echo "Pas de clé configurée : signature de débogage."
+          fi
+
+      - name: Dépendances
+        run: flutter pub get
+
+      - name: Compiler l'APK
+        run: flutter build apk --release
+
+      - name: Publier dans la release « android »
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: android
+          name: Aria — Android (dernière version)
+          body: |
+            📱 APK Android compilé automatiquement depuis le dernier code.
+
+            **Installation** : télécharge `app-release.apk` ci-dessous sur ton
+            téléphone, ouvre le fichier et autorise l'installation.
+          files: build/app/outputs/flutter-apk/app-release.apk
