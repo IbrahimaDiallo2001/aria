@@ -5,6 +5,7 @@
 import 'dart:convert';
 import 'dart:math' as math;
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
@@ -48,6 +49,9 @@ class _EcranAccueilState extends State<EcranAccueil> {
   bool _rappelActif = false;
   int _rappelH = 8;
   int _rappelM = 0;
+  bool _rappelJrnActif = false;
+  int _rappelJrnH = 21;
+  int _rappelJrnM = 0;
   List<Map<String, dynamic>> _historique = []; // {d:'YYYY-MM-DD', f:int, t:int}
   int _fenetreHisto = 7; // 7 ou 30 jours pour le graphique
   // Journal : une entrée par jour {d:'YYYY-MM-DD', appris, g1, g2, g3}
@@ -57,6 +61,7 @@ class _EcranAccueilState extends State<EcranAccueil> {
   final _ctrlGrat1 = TextEditingController();
   final _ctrlGrat2 = TextEditingController();
   final _ctrlGrat3 = TextEditingController();
+  final _ctrlRecherche = TextEditingController();
 
   @override
   void initState() {
@@ -73,6 +78,7 @@ class _EcranAccueilState extends State<EcranAccueil> {
     _ctrlGrat1.dispose();
     _ctrlGrat2.dispose();
     _ctrlGrat3.dispose();
+    _ctrlRecherche.dispose();
     super.dispose();
   }
 
@@ -106,6 +112,9 @@ class _EcranAccueilState extends State<EcranAccueil> {
     _rappelActif = prefs.getBool('aria_rappel_actif') ?? false;
     _rappelH = prefs.getInt('aria_rappel_h') ?? 8;
     _rappelM = prefs.getInt('aria_rappel_m') ?? 0;
+    _rappelJrnActif = prefs.getBool('aria_rappel_jrn_actif') ?? false;
+    _rappelJrnH = prefs.getInt('aria_rappel_jrn_h') ?? 21;
+    _rappelJrnM = prefs.getInt('aria_rappel_jrn_m') ?? 0;
     _historique = _lireHistorique(prefs);
     await _verifierJour(prefs); // remet à zéro + archive si nouveau jour
     if (mounted) setState(() {});
@@ -142,7 +151,14 @@ class _EcranAccueilState extends State<EcranAccueil> {
     final total = _totalPratiques;
     if (total > 0) {
       _historique.removeWhere((e) => e['d'] == stocke);
-      _historique.add({'d': stocke, 'f': faits, 't': total});
+      _historique.add({
+        'd': stocke,
+        'f': faits,
+        't': total,
+        // Détail par pilier (faits / total) pour l'écran Progrès.
+        'pf': [for (final e in _etats) e.where((x) => x).length],
+        'pt': [for (final e in _etats) e.length],
+      });
       while (_historique.length > 120) {
         _historique.removeAt(0);
       }
@@ -274,6 +290,39 @@ class _EcranAccueilState extends State<EcranAccueil> {
     } else {
       NotifsService.annulerRappelQuotidien();
     }
+    if (_rappelJrnActif) {
+      NotifsService.planifierRappelJournal(
+        heure: _rappelJrnH,
+        minute: _rappelJrnM,
+        titre: '🌙 Aria',
+        corps: tr("N'oublie pas ton journal du soir ✍️"),
+      );
+    } else {
+      NotifsService.annulerRappelJournal();
+    }
+  }
+
+  Future<void> _toggleRappelJournal(bool v) async {
+    setState(() => _rappelJrnActif = v);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('aria_rappel_jrn_actif', v);
+    _appliquerRappel();
+  }
+
+  Future<void> _choisirHeureRappelJournal() async {
+    final t = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay(hour: _rappelJrnH, minute: _rappelJrnM),
+    );
+    if (t == null) return;
+    setState(() {
+      _rappelJrnH = t.hour;
+      _rappelJrnM = t.minute;
+    });
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('aria_rappel_jrn_h', _rappelJrnH);
+    await prefs.setInt('aria_rappel_jrn_m', _rappelJrnM);
+    if (_rappelJrnActif) _appliquerRappel();
   }
 
   Future<void> _toggleRappel(bool v) async {
@@ -328,63 +377,97 @@ class _EcranAccueilState extends State<EcranAccueil> {
 
   Future<void> _importer() async {
     final ctrl = TextEditingController();
-    final ok = await showDialog<bool>(
+    final texte = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text(tr('Importer des données')),
         content: SizedBox(
           width: double.maxFinite,
-          child: TextField(
-            controller: ctrl,
-            maxLines: 8,
-            decoration: InputDecoration(
-              hintText: tr('Colle ici ta sauvegarde…'),
-              border: const OutlineInputBorder(),
-            ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              FilledButton.tonalIcon(
+                onPressed: () async {
+                  try {
+                    final res = await FilePicker.platform.pickFiles(
+                      type: FileType.custom,
+                      allowedExtensions: ['json'],
+                      withData: true,
+                    );
+                    final octets = res?.files.single.bytes;
+                    if (octets == null) return;
+                    if (ctx.mounted) Navigator.pop(ctx, utf8.decode(octets));
+                  } catch (_) {
+                    // Sélecteur indisponible : le collage reste possible.
+                  }
+                },
+                icon: const Icon(Icons.folder_open_rounded),
+                label: Text(tr('Choisir un fichier')),
+              ),
+              const SizedBox(height: 14),
+              Text(tr('ou colle ta sauvegarde :'),
+                  style: TextStyle(fontSize: 12.5, color: cMutedOf(context))),
+              const SizedBox(height: 8),
+              TextField(
+                controller: ctrl,
+                maxLines: 5,
+                decoration: InputDecoration(
+                  hintText: tr('Colle ici ta sauvegarde…'),
+                  border: const OutlineInputBorder(),
+                ),
+              ),
+            ],
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(tr('Annuler'))),
-          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: Text(tr('Importer'))),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: Text(tr('Annuler'))),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, ctrl.text),
+              child: Text(tr('Importer'))),
         ],
       ),
     );
-    if (ok == true) {
-      try {
-        final parsed = jsonDecode(ctrl.text) as Map<String, dynamic>;
-        final data = Map<String, dynamic>.from(parsed['data'] as Map);
-        final prefs = await SharedPreferences.getInstance();
-        for (final k in prefs.getKeys().where((k) => k.startsWith('aria_')).toList()) {
-          await prefs.remove(k);
-        }
-        for (final e in data.entries) {
-          final v = e.value;
-          if (v is bool) {
-            await prefs.setBool(e.key, v);
-          } else if (v is int) {
-            await prefs.setInt(e.key, v);
-          } else if (v is double) {
-            await prefs.setDouble(e.key, v);
-          } else if (v is String) {
-            await prefs.setString(e.key, v);
-          } else if (v is List) {
-            await prefs.setStringList(e.key, [for (final x in v) x.toString()]);
-          }
-        }
-        await _charger();
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text(tr('Import réussi. Redémarre pour le thème/la langue.')),
-            behavior: SnackBarBehavior.floating));
-        }
-      } catch (_) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text(tr('Fichier invalide.')), behavior: SnackBarBehavior.floating));
-        }
-      }
+    if (texte != null && texte.trim().isNotEmpty) {
+      await _appliquerImport(texte);
     }
     ctrl.dispose();
+  }
+
+  Future<void> _appliquerImport(String texte) async {
+    try {
+      final parsed = jsonDecode(texte) as Map<String, dynamic>;
+      final data = Map<String, dynamic>.from(parsed['data'] as Map);
+      final prefs = await SharedPreferences.getInstance();
+      for (final k in prefs.getKeys().where((k) => k.startsWith('aria_')).toList()) {
+        await prefs.remove(k);
+      }
+      for (final e in data.entries) {
+        final v = e.value;
+        if (v is bool) {
+          await prefs.setBool(e.key, v);
+        } else if (v is int) {
+          await prefs.setInt(e.key, v);
+        } else if (v is double) {
+          await prefs.setDouble(e.key, v);
+        } else if (v is String) {
+          await prefs.setString(e.key, v);
+        } else if (v is List) {
+          await prefs.setStringList(e.key, [for (final x in v) x.toString()]);
+        }
+      }
+      await _charger();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(tr('Import réussi. Redémarre pour le thème/la langue.')),
+          behavior: SnackBarBehavior.floating));
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(tr('Fichier invalide.')), behavior: SnackBarBehavior.floating));
+      }
+    }
   }
 
   void _ouvrirReglages() {
@@ -422,6 +505,29 @@ class _EcranAccueilState extends State<EcranAccueil> {
                       style: const TextStyle(fontWeight: FontWeight.w700)),
                   onTap: () async {
                     await _choisirHeureRappel();
+                    setSheet(() {});
+                  },
+                ),
+              SwitchListTile(
+                secondary: const Icon(Icons.nightlight_round),
+                title: Text(tr('Rappel du journal (soir)')),
+                subtitle: Text(_rappelJrnActif
+                    ? _fmtHeure(_rappelJrnH, _rappelJrnM)
+                    : tr('Désactivé')),
+                value: _rappelJrnActif,
+                onChanged: (v) async {
+                  await _toggleRappelJournal(v);
+                  setSheet(() {});
+                },
+              ),
+              if (_rappelJrnActif)
+                ListTile(
+                  leading: const Icon(Icons.schedule_rounded),
+                  title: Text(tr('Heure du rappel')),
+                  trailing: Text(_fmtHeure(_rappelJrnH, _rappelJrnM),
+                      style: const TextStyle(fontWeight: FontWeight.w700)),
+                  onTap: () async {
+                    await _choisirHeureRappelJournal();
                     setSheet(() {});
                   },
                 ),
@@ -746,6 +852,21 @@ class _EcranAccueilState extends State<EcranAccueil> {
     return null;
   }
 
+  // Série d'écriture : jours consécutifs avec une entrée de journal.
+  int get _serieJournal {
+    final jours = {for (final e in _journalEntrees) e['d'] as String};
+    final now = DateTime.now();
+    var j = DateTime(now.year, now.month, now.day);
+    int n = 0;
+    if (jours.contains(_cleJour(j))) n = 1;
+    j = j.subtract(const Duration(days: 1));
+    while (jours.contains(_cleJour(j))) {
+      n++;
+      j = j.subtract(const Duration(days: 1));
+    }
+    return n;
+  }
+
   Future<void> _persisterJournal() async {
     final prefs = await SharedPreferences.getInstance();
     _journalEntrees.sort((a, b) => (b['d'] as String).compareTo(a['d'] as String));
@@ -866,35 +987,41 @@ class _EcranAccueilState extends State<EcranAccueil> {
   }
 
   Widget _entete(String petit, String grand) {
-    return Row(
+    return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (_onglet != 0) ...[
-          IconButton.filledTonal(
-            onPressed: _retourOnglet,
-            tooltip: tr('Retour'),
-            icon: const Icon(Icons.arrow_back_rounded),
-          ),
-          const SizedBox(width: 10),
-        ],
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(petit, style: TextStyle(color: cMutedOf(context), fontWeight: FontWeight.w600)),
-              const SizedBox(height: 2),
-              Text(grand, style: TextStyle(fontSize: 27, fontWeight: FontWeight.w700, color: cInkOf(context))),
+        Row(
+          children: [
+            if (_onglet != 0) ...[
+              IconButton.filledTonal(
+                onPressed: _retourOnglet,
+                tooltip: tr('Retour'),
+                icon: const Icon(Icons.arrow_back_rounded),
+              ),
+              const SizedBox(width: 10),
             ],
-          ),
+            Expanded(
+              child: Text(petit,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: cMutedOf(context), fontWeight: FontWeight.w600)),
+            ),
+            IconButton.filledTonal(onPressed: _ouvrirReglages, icon: const Icon(Icons.tune_rounded)),
+            const SizedBox(width: 8),
+            IconButton.filledTonal(onPressed: _choisirLangue, icon: const Icon(Icons.language_rounded)),
+            const SizedBox(width: 8),
+            IconButton.filledTonal(
+              onPressed: widget.onToggleTheme,
+              icon: Icon(widget.isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded),
+            ),
+          ],
         ),
-        IconButton.filledTonal(onPressed: _ouvrirReglages, icon: const Icon(Icons.tune_rounded)),
-        const SizedBox(width: 8),
-        IconButton.filledTonal(onPressed: _choisirLangue, icon: const Icon(Icons.language_rounded)),
-        const SizedBox(width: 8),
-        IconButton.filledTonal(
-          onPressed: widget.onToggleTheme,
-          icon: Icon(widget.isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded),
-        ),
+        const SizedBox(height: 6),
+        // Le grand titre occupe sa propre ligne, jamais coupé en deux.
+        Text(grand,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 27, fontWeight: FontWeight.w700, color: cInkOf(context))),
       ],
     );
   }
@@ -1247,12 +1374,43 @@ class _EcranAccueilState extends State<EcranAccueil> {
     );
   }
 
+  // Fractions de complétion d'un pilier sur les n derniers jours.
+  List<({String label, double frac, bool auj})> _serieJoursPilier(int i, int n) {
+    final map = <String, double>{};
+    for (final e in _historique) {
+      final pf = e['pf'];
+      final pt = e['pt'];
+      if (pf is List && pt is List && i < pf.length && i < pt.length) {
+        final t = (pt[i] as num).toInt();
+        map[e['d'] as String] =
+            t > 0 ? ((pf[i] as num).toInt() / t).clamp(0.0, 1.0) : 0.0;
+      }
+    }
+    final today = DateTime.now();
+    final base = DateTime(today.year, today.month, today.day);
+    final res = <({String label, double frac, bool auj})>[];
+    for (int k = n - 1; k >= 0; k--) {
+      final d = base.subtract(Duration(days: k));
+      final auj = k == 0;
+      final frac = auj
+          ? (_etats[i].isEmpty
+              ? 0.0
+              : _etats[i].where((x) => x).length / _etats[i].length)
+          : (map[_cleJour(d)] ?? 0.0);
+      final nomJour = tr(kJoursFr[d.weekday - 1]);
+      res.add((label: nomJour.isNotEmpty ? nomJour[0] : '', frac: frac, auj: auj));
+    }
+    return res;
+  }
+
   Widget _carteProgres(int i) {
     final p = piliers[i];
     final etat = _etats[i];
     final faits = etat.where((x) => x).length;
     final total = etat.length;
     final pct = total == 0 ? 0 : ((faits / total) * 100).round();
+    final jours = _serieJoursPilier(i, 7);
+    const maxH = 30.0;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -1283,6 +1441,46 @@ class _EcranAccueilState extends State<EcranAccueil> {
               backgroundColor: cBorderOf(context),
               color: p.couleur,
             ),
+          ),
+          const SizedBox(height: 12),
+          // Mini-historique des 7 derniers jours pour ce pilier.
+          SizedBox(
+            height: maxH,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                for (final j in jours)
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 3),
+                      child: Container(
+                        height: (j.frac * maxH).clamp(3.0, maxH),
+                        decoration: BoxDecoration(
+                          color: j.auj
+                              ? p.couleur
+                              : p.couleur.withValues(alpha: 0.35),
+                          borderRadius: BorderRadius.circular(3),
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 4),
+          Row(
+            children: [
+              for (final j in jours)
+                Expanded(
+                  child: Text(j.label,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 9,
+                        fontWeight: j.auj ? FontWeight.w700 : FontWeight.w400,
+                        color: j.auj ? p.couleur : cMutedOf(context),
+                      )),
+                ),
+            ],
           ),
         ],
       ),
@@ -1558,18 +1756,52 @@ class _EcranAccueilState extends State<EcranAccueil> {
   }
 
   // ── JOURNAL ────────────────────────────────────────────────
+  bool _entreeContient(Map<String, dynamic> e, String q) {
+    for (final k in ['appris', 'g1', 'g2', 'g3']) {
+      if (((e[k] ?? '') as String).toLowerCase().contains(q)) return true;
+    }
+    return _dateEntree(e['d'] as String).toLowerCase().contains(q);
+  }
+
   Widget _pageJournal() {
     final auj = _cleJour(DateTime.now());
-    final anciennes = [
+    final toutesAnciennes = [
       for (final e in _journalEntrees)
         if (e['d'] != auj) e
     ];
+    final q = _ctrlRecherche.text.trim().toLowerCase();
+    final anciennes = q.isEmpty
+        ? toutesAnciennes
+        : [
+            for (final e in toutesAnciennes)
+              if (_entreeContient(e, q)) e
+          ];
+    final serie = _serieJournal;
     return ListView(
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 28),
       children: [
         _entete(tr('Ton espace'), tr('Journal du soir')),
         const SizedBox(height: 4),
         Text(dateFr(), style: TextStyle(color: cMutedOf(context), fontSize: 13)),
+        if (serie > 0) ...[
+          const SizedBox(height: 10),
+          Align(
+            alignment: AlignmentDirectional.centerStart,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              decoration: BoxDecoration(
+                color: cOr.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: cOr.withValues(alpha: 0.4)),
+              ),
+              child: Text(
+                '✍️ $serie ${serie == 1 ? tr("jour d'écriture") : tr("jours d'écriture")}',
+                style: TextStyle(
+                    fontSize: 12.5, fontWeight: FontWeight.w700, color: cInkOf(context)),
+              ),
+            ),
+          ),
+        ],
         const SizedBox(height: 20),
         _carteJournal(titre: tr("📝 Qu'as-tu appris aujourd'hui ?"), enfant: _champ(_ctrlAppris, tr('Écris librement…'), lignes: 4)),
         _carteJournal(
@@ -1593,7 +1825,7 @@ class _EcranAccueilState extends State<EcranAccueil> {
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           ),
         ),
-        if (anciennes.isNotEmpty) ...[
+        if (toutesAnciennes.isNotEmpty) ...[
           const SizedBox(height: 26),
           Text(tr('ENTRÉES PRÉCÉDENTES'),
               style: TextStyle(
@@ -1602,7 +1834,43 @@ class _EcranAccueilState extends State<EcranAccueil> {
                   letterSpacing: 0.6,
                   fontSize: 12.5)),
           const SizedBox(height: 12),
-          for (final e in anciennes) _carteEntreeJournal(e),
+          if (toutesAnciennes.length > 2) ...[
+            TextField(
+              controller: _ctrlRecherche,
+              onChanged: (_) => setState(() {}),
+              style: TextStyle(color: cInkOf(context), fontSize: 14),
+              decoration: InputDecoration(
+                hintText: tr('Rechercher…'),
+                prefixIcon: Icon(Icons.search_rounded, size: 20, color: cMutedOf(context)),
+                suffixIcon: q.isEmpty
+                    ? null
+                    : IconButton(
+                        icon: const Icon(Icons.close_rounded, size: 18),
+                        onPressed: () {
+                          _ctrlRecherche.clear();
+                          setState(() {});
+                        },
+                      ),
+                filled: true,
+                fillColor: cFieldOf(context),
+                isDense: true,
+                border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
+          if (anciennes.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 18),
+              child: Center(
+                child: Text(tr('Aucun résultat'),
+                    style: TextStyle(fontSize: 13, color: cMutedOf(context))),
+              ),
+            )
+          else
+            for (final e in anciennes) _carteEntreeJournal(e),
         ],
       ],
     );

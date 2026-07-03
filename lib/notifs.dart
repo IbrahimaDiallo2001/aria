@@ -100,11 +100,16 @@ class NotifsService {
     } catch (_) {}
   }
 
-  // Id réservé au rappel quotidien d'habitudes (hors plage des id de projets).
+  // Ids réservés aux rappels quotidiens (hors plage des id de projets).
   static const int _idRappelHabitudes = 987654321;
+  static const int _idRappelJournal = 987654322;
 
-  /// Rappel quotidien répété à [heure]:[minute].
-  static Future<void> planifierRappelQuotidien({
+  /// Planifie une notification quotidienne répétée à [heure]:[minute].
+  static Future<void> _planifierQuotidien({
+    required int id,
+    required String canalId,
+    required String canalNom,
+    required String canalDesc,
     required int heure,
     required int minute,
     required String titre,
@@ -112,24 +117,24 @@ class NotifsService {
   }) async {
     if (kIsWeb || !_pret) return;
     try {
-      await _plugin.cancel(_idRappelHabitudes);
+      await _plugin.cancel(id);
       final now = tz.TZDateTime.now(tz.local);
       var quand = tz.TZDateTime(tz.local, now.year, now.month, now.day, heure, minute);
       if (!quand.isAfter(now)) quand = quand.add(const Duration(days: 1));
       await _plugin.zonedSchedule(
-        _idRappelHabitudes,
+        id,
         titre,
         corps,
         quand,
-        const NotificationDetails(
+        NotificationDetails(
           android: AndroidNotificationDetails(
-            'aria_habitudes',
-            "Rappels d'habitudes",
-            channelDescription: 'Rappel quotidien pour tes pratiques Aria',
+            canalId,
+            canalNom,
+            channelDescription: canalDesc,
             importance: Importance.high,
             priority: Priority.high,
           ),
-          iOS: DarwinNotificationDetails(),
+          iOS: const DarwinNotificationDetails(),
         ),
         androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
         uiLocalNotificationDateInterpretation:
@@ -139,10 +144,53 @@ class NotifsService {
     } catch (_) {}
   }
 
+  /// Rappel quotidien des pratiques.
+  static Future<void> planifierRappelQuotidien({
+    required int heure,
+    required int minute,
+    required String titre,
+    required String corps,
+  }) =>
+      _planifierQuotidien(
+        id: _idRappelHabitudes,
+        canalId: 'aria_habitudes',
+        canalNom: "Rappels d'habitudes",
+        canalDesc: 'Rappel quotidien pour tes pratiques Aria',
+        heure: heure,
+        minute: minute,
+        titre: titre,
+        corps: corps,
+      );
+
   static Future<void> annulerRappelQuotidien() async {
     if (kIsWeb || !_pret) return;
     try {
       await _plugin.cancel(_idRappelHabitudes);
+    } catch (_) {}
+  }
+
+  /// Rappel quotidien du journal du soir.
+  static Future<void> planifierRappelJournal({
+    required int heure,
+    required int minute,
+    required String titre,
+    required String corps,
+  }) =>
+      _planifierQuotidien(
+        id: _idRappelJournal,
+        canalId: 'aria_journal',
+        canalNom: 'Rappel du journal',
+        canalDesc: 'Rappel du soir pour le journal Aria',
+        heure: heure,
+        minute: minute,
+        titre: titre,
+        corps: corps,
+      );
+
+  static Future<void> annulerRappelJournal() async {
+    if (kIsWeb || !_pret) return;
+    try {
+      await _plugin.cancel(_idRappelJournal);
     } catch (_) {}
   }
 }
