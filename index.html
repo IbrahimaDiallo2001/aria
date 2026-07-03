@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <!--
+    If you are serving your web app in a path other than the root, change the
+    href value below to reflect the base path you are serving from.
+
+    The path provided below has to start and end with a slash "/" in order for
+    it to work correctly.
+
+    For more details:
+    * https://developer.mozilla.org/en-US/docs/Web/HTML/Element/base
+
+    This is a placeholder for base href that will be replaced by the value of
+    the `--base-href` argument provided to `flutter build`.
+  -->
+  <base href="$FLUTTER_BASE_HREF">
+
+  <meta charset="UTF-8">
+  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
+  <meta name="description" content="Aria — ton équilibre au quotidien.">
+  <meta name="theme-color" content="#0B0F1A">
+
+  <!-- iOS meta tags & icons -->
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Aria">
+  <link rel="apple-touch-icon" href="icons/Icon-192.png">
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/png" href="favicon.png"/>
+
+  <title>Aria</title>
+  <link rel="manifest" href="manifest.json">
+</head>
+<body style="margin:0;background:#0B0F1A">
+  <!-- Écran de chargement (remplacé par l'app une fois prête) -->
+  <div id="chargement" style="position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#0B0F1A;font-family:Georgia,serif">
+    <div style="width:88px;height:88px;border-radius:50%;background:linear-gradient(135deg,#E6C063,#D4AF37);box-shadow:0 0 60px rgba(212,175,55,.45)"></div>
+    <div style="margin-top:22px;color:#F4EFE3;font-size:30px;letter-spacing:3px">Aria</div>
+    <div style="margin-top:8px;color:#98A1B6;font-size:13px">Chargement…</div>
+  </div>
+  <script src="flutter_bootstrap.js" async></script>
+  <script>
+    // Retire l'écran de chargement dès que Flutter a dessiné sa première image.
+    window.addEventListener('flutter-first-frame', function () {
+      var c = document.getElementById('chargement');
+      if (c) c.remove();
+    });
+  </script>
+</body>
+</html>
